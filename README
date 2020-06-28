@@ -1,0 +1,4 @@
+[USAGE] sjdc [-V] <LOGIN_ID> <PASSWORD>
+
+OPTION:
+    -V, --version         Output version information and exit

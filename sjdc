@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+###############################################################################
+# @(#) Sompo Japan DC Securities Scraper
+#
+# Get the number of shares from Sompo Japan DC Secrities
+#
+#
+# MIT License
+#
+# Copyright (c) Shibata, Tats
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+#
+###############################################################################
+# {{{ const
+
+__version__ = "1.0"
+
+LOGIN_URL = "https://www.rk.sjdc.co.jp/RKWEB/RkDCMember/Common/JP_D_BFKLogin.aspx"
+HOME_URL = "https://www.rk.sjdc.co.jp/RKWEB/RkDCMember/Home/JP_D_MemHome.aspx"
+
+# }}}
+# {{{ import
+
+from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+import getopt
+import re
+import sys
+
+# }}}
+# {{{ usage()
+
+def usage():
+    print("""
+[USAGE] sjdc [-V] <LOGIN_ID> <PASSWORD>
+
+OPTION:
+    -V, --version         Output version information and exit
+""", file=sys.stderr)
+
+# }}}
+# {{{ version()
+
+def version():
+    print("Sompo Japan DC Securities Scraper %s " % (__version__))
+
+# }}}
+# {{{ Option
+
+class Option(object):
+    def __init__(self, opts, args):
+        self._set_opts(opts)
+        self._set_args(args) 
+
+    def _set_opts(self, opts):
+        for o, a in opts:
+            if o in ("-V", "--version"):
+                version()
+                sys.exit(1)
+
+    def _set_args(self, args):
+        if len(args) > 0:
+            self.login_id = args[0]
+        else:
+            self.login_id = input("Login ID: ")
+
+        if len(args) > 1:
+            self.password = args[1]
+        else:
+            self.password = input("Password: ")
+
+# }}}
+# {{{ valid_opt()
+
+def valid_opt(argv):
+    try:
+        opts, args = getopt.gnu_getopt(
+            argv[1:],
+            "V",
+            ["version"]
+        )
+    except getopt.GetoptError:
+        print("[ERROR] Unknown option", file=sys.stderr)
+        usage()
+        sys.exit(1)
+
+    return Option(opts, args)
+
+# }}}
+# {{{ obtain_html
+
+def obtain_html(login_id, password):
+    o = Options()
+    o.add_argument("--headless")
+
+    try:
+        driver = webdriver.Chrome(options = o)
+
+        # Login
+        driver.get(LOGIN_URL)
+        driver.find_element_by_id("txtUserID").send_keys(login_id)
+        driver.find_element_by_id("txtPassword").send_keys(password)
+        driver.find_element_by_id("btnLogin").click()
+        driver.implicitly_wait(10)
+
+        # Move to home directly, because a changing password warning might be appeared.
+        driver.get(HOME_URL)
+        driver.implicitly_wait(10)
+
+        # Click Portfolio. Do not move to Portfolio directly, because permission error is returned.
+        driver.find_element_by_id(
+            "D_Header1_uscD_CategoryMenu1_rptFunctionMenuTable__ctl2_btnMenuData"
+        ).click()
+        driver.implicitly_wait(10)
+
+        return driver.page_source
+    finally:
+        driver.quit()
+
+# }}}
+# {{{ obtain_funds()
+
+def obtain_funds(html):
+    soup = BeautifulSoup(html, "html.parser")
+    anchors = soup.select("#grdSyouhinzangaku td[style='width:225px;'] a")
+    shares = soup.select("#grdSyouhinzangaku td[style='width:89px;']")
+
+    out = []
+    i = 0
+    for anchor in anchors:
+        fund_id = re.sub(
+            r"javascript:subSyohinNew\('\.\./Knowledge/JP_D_Knowledge_InvestTrust_Inquiry\.aspx\?SCD=([A-Z0-9]+)&CCD=01'\)",
+            r"\1",
+            anchor.get("href")
+        )
+
+        share = shares[i].get_text(strip = True).replace(",", "").replace("口", "")
+
+        out.append({"id": fund_id, "shares": share})
+
+        i = i + 1
+
+    return out
+
+# }}}
+# {{{ main()
+
+def main():
+    opt = valid_opt(sys.argv)
+
+    html = obtain_html(opt.login_id, opt.password)
+
+    funds = obtain_funds(html)
+
+    for fund in funds:
+        print("%s,%s" % (fund["id"], fund["shares"]))
+
+    exit(0)
+
+if __name__ == "__main__":
+    main()
